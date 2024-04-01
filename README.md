@@ -1,11 +1,10 @@
 # DRV16C550_6502
 This is a driver for uart 16C550 to be used with 6502.
 
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-; BIOS
-;
-;; vERSION 0.0.1
+        ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+        ; BIOS
+        ;
+        ;; vERSION 0.0.1
 
 This version has the following characteristics:
 1 - B_READ_BYTE:
