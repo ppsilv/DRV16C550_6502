@@ -51,10 +51,13 @@ This routine write one byte to uart it does not change carry flag,but it does se
 
 # bios.cfg
 This file reflects my hardware as described bellow.
-800Hexa IO 
+
 1 - RAM - From 0000 to 77FF - 30k bytes.
+
 2 - IO  - From 7800 to 7FFF - 2k bytes.
+
 3 - ROM - From 8000 to FFFF - 32k bytes.
+
 
 
 
