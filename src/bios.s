@@ -217,8 +217,6 @@ WAIT_FOR_THR_EMPTY:
 ; Flag CARRY not changed.
 ;
 WRITE_BYTE_WITH_LF:
-    STY     MPHY                ; Save Y Reg
-    STX     MPHX                ; Save X Reg
     PHA                         ; Save A Reg
 @WAIT_FOR_THR_EMPTY:
     LDA     PORT+RLSR           ; Get the Line Status Register
@@ -229,14 +227,15 @@ WRITE_BYTE_WITH_LF:
     PHA
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;DELAY BETWEEN CHAR SENT
-    LDY     #$40
+    LDA     #$40
+    STA     COUNTER1
 @YDELAY:
     LDA     #$FF
     STA     COUNTER
 @txdelay:
     DEC     COUNTER
     BNE     @txdelay
-    DEY
+    DEC     COUNTER1
     BNE     @YDELAY
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;WRITE A LF IF ACC HAS A $0D IN IT
@@ -247,8 +246,6 @@ WRITE_BYTE_WITH_LF:
     JSR     WRITE_BYTE
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 WRITE_BYTE_WITH_ECHO_FIM:
-    LDX     MPHX                ; Restore X Reg
-    LDY     MPHY                ; Restore Y Reg
     RTS
 
 
