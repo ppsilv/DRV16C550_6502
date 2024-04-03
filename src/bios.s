@@ -3,12 +3,14 @@
 ; AUTHOR: Paulo da Silva (pgordao) copyright (C) 2024
 ;
 ;
-;; vERSION 0.0.1
+;; VERSION 0.0.2
 
 .setcpu "6502"
 .debuginfo
 
 .segment "ZEROPAGE"
+
+ACC = $32
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; These variable is just for test of UART.
 MSGL     = $33
@@ -27,8 +29,10 @@ COUNTER  = $37
 ;Flag to sign the use of WRITE_BYTE or WRITE_BYTE_LF
 MEOR     = $38
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+COUNTER1 = $39
 
 .segment "BIOS"
+VERSION:    .byte "0.0.2"
 
 ;Uart registers
 PORT = $7800  ;;Uart address
@@ -79,6 +83,7 @@ MCR_OUT2 = $08  ;output #2
 MCR_LOOP = $10  ;loop back
 MCR_AFCE = $20  ;auto flow control enable
 
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; INITUART: Initialize uart 16C550
 ; Registers changed: NONE
@@ -102,6 +107,51 @@ INITUART:
     RTS
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; READ_BYTE: Read byte from UART waiting for it (NO BLOCANT) No echo
+; Registers changed: A, Y
+; Flag CARRY: Set when character ready
+;             Clear when no character ready
+READ_BYTE:
+	LDA PORT+RLSR 												;// check the line status register:
+	AND #(OVERRUN_ERR | PARITY_ERR | FRAMING_ERR | BREAK_INT)   ; check for errors
+	BEQ @NO_ERR 												    ;// if no error bits, are set, no error
+	LDA PORT+R_RX
+	JMP NO_CHAR
+@NO_ERR:
+	LDA PORT+RLSR 												    ;// reload the line status register
+	AND #DATA_READY
+	BEQ NO_CHAR   											;// if data ready is not set, loop
+	LDA PORT+R_RX
+    JSR     ACC_DELAY
+	SEC		    										;// otherwise, we have data! Load it. 				    									;// clear the carry flag to indicate no error
+	RTS
+NO_CHAR:
+    JSR     ACC_DELAY
+    CLC
+    RTS
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;
+ACC_DELAY:   
+    PHA
+    LDY     #$FF
+@txdelay1:
+    DEY
+    BNE     @txdelay1
+    PLA
+    RTS
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; READ_BYTE: Read byte from UART waiting for it (NO BLOCANT)
+; Registers changed: A, Y
+; Flag CARRY: Set when character ready
+;             Clear when no character ready
+READ_BYTE_ECHO:
+    JSR     READ_BYTE
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;ECHO CHAR
+    JSR     WRITE_BYTE_WITH_LF
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+    RTS
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; B_READ_BYTE: Read byte from UART waiting for it (BLOCANT)
 ; Registers changed: A
 ; Flag CARRY not changed.
@@ -117,47 +167,19 @@ B_READ_BYTE:
 	AND #DATA_READY
 	BEQ B_READ_BYTE   											;// if data ready is not set, loop
 	LDA PORT+R_RX
+	RTS
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+; B_READ_BYTE_ECHO: Read byte from UART waiting for it (BLOCANT) with echo
+; Registers changed: A
+; Flag CARRY not changed.
+;
+B_READ_BYTE_ECHO:
+    JSR     B_READ_BYTE
 ;ECHO CHAR
-    ;JSR WRITE_BYTE
+    JSR     WRITE_BYTE_WITH_LF
 ;*********
 	RTS
-										    ;// otherwise, there was an error. Clear the error byte
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-; READ_BYTE: Read byte from UART waiting for it (NO BLOCANT)
-; Registers changed: A, Y
-; Flag CARRY: Set when character ready
-;             Clear when no character ready
-READ_BYTE:
-    STY     MPHY                ; Save Y Reg
-	LDA PORT+RLSR 												;// check the line status register:
-	AND #(OVERRUN_ERR | PARITY_ERR | FRAMING_ERR | BREAK_INT)   ; check for errors
-	BEQ @NO_ERR 												    ;// if no error bits, are set, no error
-	LDA PORT+R_RX
-	JMP NO_CHAR ;READ_BYTE
-@NO_ERR:
-	LDA PORT+RLSR 												    ;// reload the line status register
-	AND #DATA_READY
-	BEQ NO_CHAR   											;// if data ready is not set, loop
-	LDA PORT+R_RX
-    LDY     #$FF
-@txdelay:
-    DEY
-    BNE     @txdelay
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;ECHO CHAR
-    ;JSR WRITE_BYTE
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-    LDY     MPHY
-	SEC		    										;// otherwise, we have data! Load it. 				    									;// clear the carry flag to indicate no error
-	RTS
-NO_CHAR:
-    LDY     #$FF
-@txdelay1:
-    DEY
-    BNE     @txdelay1
-    LDY     MPHY
-    CLC
-    RTS
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; WRITE_BYTE: Write byte to UART
@@ -165,9 +187,7 @@ NO_CHAR:
 ; Flag CARRY not changed.
 ;
 WRITE_BYTE:
-    STY     MPHY                ; Save Y Reg
-    STX     MPHX                ; Save X Reg
-    PHA                         ; Save A Reg
+    PHA
 WAIT_FOR_THR_EMPTY:
     LDA     PORT+RLSR           ; Get the Line Status Register
     AND     #THR_EMPTY          ; Check for TX empty
@@ -177,27 +197,26 @@ WAIT_FOR_THR_EMPTY:
     PHA
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;DELAY BETWEEN CHAR SENT
-    LDY     #$10
+    LDA     #$40
+    STA     COUNTER1
 @YDELAY:
     LDA     #$FF
     STA     COUNTER
 @txdelay:
     DEC     COUNTER
     BNE     @txdelay
-    DEY
+    DEC     COUNTER1
     BNE     @YDELAY
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
     PLA
-    LDX     MPHX                ; Restore X Reg
-    LDY     MPHY                ; Restore Y Reg
     RTS
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-; WRITE_BYTE_WITH_ECHO: Write byte to UART, IF BYTE IS 0D WRITE 0A(LF) TOO
+; WRITE_BYTE_WITH_LF: Write byte to UART, IF BYTE IS 0D WRITE 0A(LF) TOO
 ; Registers changed: NONE
 ; Flag CARRY not changed.
 ;
-WRITE_BYTE_WITH_ECHO:
+WRITE_BYTE_WITH_LF:
     STY     MPHY                ; Save Y Reg
     STX     MPHX                ; Save X Reg
     PHA                         ; Save A Reg
@@ -210,7 +229,7 @@ WRITE_BYTE_WITH_ECHO:
     PHA
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;DELAY BETWEEN CHAR SENT
-    LDY     #$10
+    LDY     #$40
 @YDELAY:
     LDA     #$FF
     STA     COUNTER
@@ -236,6 +255,7 @@ WRITE_BYTE_WITH_ECHO_FIM:
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; The code from here is just for test of UART.
 RESET:
+
 	    SEI						; No interrupt
 	    CLD						; Set decimal
 	    LDX #$ff				; Set stack pointer
@@ -249,45 +269,113 @@ RESET:
         LDA     #>MSG0
         STA     MSGH
         JSR     SHWMSG
+        ;READ_BYTE no blocant sem echo
 WORK:
-        LDA     MEOR
-        CMP     #$FF
-        BEQ     WR_LF
         JSR     READ_BYTE
         BCC     WORK
-        CMP     #'S'
-        BEQ     GO_LF
+        CMP     #'0'
+        BEQ     RD_NO_BL_NO_LF
+        CMP     #'1'
+        BEQ     RD_BL_NO_ECHO_NO_LF
+        CMP     #'2'
+        BEQ     RD_NO_BL_COM_ECHO_COM_LF
+        CMP     #'3'
+        BEQ     RD_BL_COM_ECHO_COM_LF
         JSR     WRITE_BYTE
         JMP     WORK
-WR_LF:
-        JSR     B_READ_BYTE
-        CMP     #'S'
-        BEQ     GO_LF
-        JSR     WRITE_BYTE_WITH_ECHO
+
+        ;READ_BYTE no blocant sem echo write sem LF
+RD_NO_BL_NO_LF:
+        JSR     pmsg1
+RD_NO_BL_1:        
+        JSR     READ_BYTE           ;NAO BLOCANTE
+        BCC     RD_NO_BL_1
+        JSR     WRITE_BYTE          ;SEM LF    
+        CMP     #'R'
+        BNE     RD_NO_BL_1
         JMP     WORK
 
 
-GO_LF:
-        LDA     #$FF
-        EOR     MEOR
-        STA     MEOR
+        ;READ_BYTE blocant sem echo write sem LF
+RD_BL_NO_ECHO_NO_LF:
+        JSR     pmsg2
+RD_NO_BL_ECHO_1:
+        JSR     B_READ_BYTE         ;BLOCANTE
+        JSR     WRITE_BYTE          ;SEM LF
+        CMP     #'R'
+        BNE     RD_NO_BL_ECHO_1
         JMP     WORK
+
+        ;B_READ_BYTE read nao blocante com echo e write com LF
+RD_NO_BL_COM_ECHO_COM_LF:
+        JSR     pmsg3
+RD_NO_BL_COM_ECHO_COM_LF1:        
+        JSR     READ_BYTE_ECHO
+        BCC     RD_NO_BL_COM_ECHO_COM_LF1
+        CMP     #'R'
+        BNE     RD_NO_BL_COM_ECHO_COM_LF1
+        JMP     WORK
+        ;B_READ_BYTE read blocant with echo
+RD_BL_COM_ECHO_COM_LF:
+        JSR     pmsg4
+RD_BL_COM_ECHO_COM_LF1:   
+        JSR     B_READ_BYTE_ECHO     
+        CMP     #'R'
+        BNE     RD_BL_COM_ECHO_COM_LF1
+        JMP     WORK
+
+MSG0:       .byte $0D,$0A,"PROGRAM INIT 2024 - Version: DIGITE ALGUM COMANDO:",$0D,$0A,0
+MSG1:       .byte $0D,$0A,"0-READ_BYTE nao blocante sem echo e write sem LF",$0D,$0A,0
+MSG2:       .byte $0D,$0A,"1-READ_BYTE blocante sem echo e write sem lf",$0D,$0A,0
+MSG3:       .byte $0D,$0A,"2-READ_BYTE nao blocante com echo e write com LF",$0D,$0A,0
+MSG4:       .byte $0D,$0A,"3-READ_BYTE blocante com echo e write com LF",$0D,$0A,0
+
 
 ;*************************************************
 SHWMSG:         LDY #$0
-SMSG:           LDA (MSGL),Y
+SMSG:           
+                LDA (MSGL),Y
                 BEQ SMDONE
                 JSR WRITE_BYTE
-                LDA #$FF
-                STA COUNTER
-@txdelay:
-                DEC COUNTER
-                BNE @txdelay
+;;;;;;                LDA #$FF
+;;;;;;                STA COUNTER
+;;;;;;@txdelay:
+;;;;;;                DEC COUNTER
+;;;;;;                BNE @txdelay
                 INY
-                BNE SMSG
+                JMP SMSG  ;SEMPRE VAI PULAR PARA SMSG E DEVE FAZER ISSO
 SMDONE:         RTS
 
-MSG0:       .byte $0D,$0A,"PROGRAM INIT 2024 - V 0.0.1",$0D,$0A,0
+
+pmsg1:
+        LDA     #<MSG1
+        STA     MSGL
+        LDA     #>MSG1
+        STA     MSGH
+        JSR     SHWMSG
+        RTS
+pmsg2:
+        LDA     #<MSG2
+        STA     MSGL
+        LDA     #>MSG2
+        STA     MSGH
+        JSR     SHWMSG
+        RTS
+pmsg3:
+        LDA     #<MSG3
+        STA     MSGL
+        LDA     #>MSG3
+        STA     MSGH
+        JSR     SHWMSG
+        RTS
+pmsg4:
+        LDA     #<MSG4
+        STA     MSGL
+        LDA     #>MSG4
+        STA     MSGH
+        JSR     SHWMSG
+        RTS
+
 
 .segment "RESETVEC"
                 .word   $0F00          ; NMI vector
